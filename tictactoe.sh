@@ -5,10 +5,74 @@
 #TODO: prettify
 EMPTY='_'
 board=("$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY")
+path="$HOME/.tictactoe_saves"
+savename_start="tictactoe_save_"
 POSITIONBOARD=(1 2 3 4 5 6 7 8 9)
 player1='x'
 player2='o'
 
+set -e
+
+function save_game()
+{
+    filename="$savename_start$(date +'%Y-%m-%d-%H-%M-%S')"
+    if [ -e "$path" ]; then
+        [ -d "$path" ] || (echo "$path exists and is not a directory, aborting" \
+                           return 1)
+    else
+        mkdir -p "$path"
+    fi
+    
+    fullpath="$path/$filename"
+    if [ -e "$fullpath" ]; then
+        [ -f "$fullpath" ] || (echo "$fullpath exists and is not a file, aborting" \
+                               return 1)
+        read -r -p "$fullpath already exists. Overwrite? [y/N]"
+        [[ ${REPLY} =~ ^[yY]$ ]] || return 1
+    fi
+    echo "${board[@]}" > "$fullpath"
+}
+
+function save_game_prompt()
+{
+    printf "\n"
+    read -r -p "You've pressed Ctrl+C. Do you want to save your game before exiting? [Y/n] "
+    [[ ${REPLY} =~ ^[nN]$ ]] && exit 0
+    if ! save_game; then
+        read -r -p "Save was not successful (error code $?). Do you want to quit? [y/N]"
+        [[ ${REPLY} =~ ^[yY]$ ]] && exit 1
+    fi
+    exit 0
+}
+
+function try_loading_game()
+{
+    # Check if there are any saves
+    [ ! -d "$path" ] && return 0;
+    filelist=("$path"/*)
+    [ -e "${filelist[0]}" ] || return 0;
+
+    echo "There are following saves present: "
+    i=0
+
+    for file in "${filelist[@]}"; do
+        echo "$i : ${file#$savename_start}"
+        i=$((i+1))
+    done
+    while true; do
+        read -r -p "Choose save to load (numeric value), or press any other key to start a new game: "
+        if [[ "${REPLY}" =~ ^[0-9]+$ ]]; then
+            if [ "${REPLY}" -ge ${#filelist[@]} ]; then
+                echo "Invalid index: ${REPLY}"
+                continue
+            else
+                read -r -a board <<< "$(cat "${filelist[$REPLY]}")"
+                rm "${filelist[$REPLY]}"
+            fi
+        fi
+        break
+    done
+}
 
 function print_board()
 {
@@ -104,11 +168,14 @@ function play()
 
 function main()
 {
+    board=("$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY")
     while true; do
-        board=("$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY")
+        try_loading_game
+        trap 'save_game_prompt' INT
         play
         read -r -p "Do you want to play again? [Y/n]"
         [[ ${REPLY} =~ ^[nN]$ ]] && break
+        board=("$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY" "$EMPTY")
     done
 }
 
