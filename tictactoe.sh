@@ -10,8 +10,16 @@ savename_start="tictactoe_save_"
 POSITIONBOARD=(1 2 3 4 5 6 7 8 9)
 player1='x'
 player2='o'
+current_player=''
+computer_player=''
 
 set -e
+
+function ask_question()
+{
+    read -r -p "${1} "
+    [[ ${REPLY} =~ ${2} ]] && return 0 || return 1
+}
 
 function save_game()
 {
@@ -27,20 +35,23 @@ function save_game()
     if [ -e "$fullpath" ]; then
         [ -f "$fullpath" ] || (echo "$fullpath exists and is not a file, aborting" \
                                return 1)
-        read -r -p "$fullpath already exists. Overwrite? [y/N]"
-        [[ ${REPLY} =~ ^[yY]$ ]] || return 1
+        
+        ask_question "$fullpath already exists. Overwrite? [y/N]" ^[yY]$ || return 1
     fi
-    echo "${board[@]}" > "$fullpath"
+    if [ -z "${computer_player}" ]; then
+        echo "${board[@]}" "|${current_player}" > "$fullpath"
+    else
+        echo "${board[@]}" "|${current_player}|${computer_player}" > "$fullpath"
+    fi
 }
 
 function save_game_prompt()
 {
     printf "\n"
-    read -r -p "You've pressed Ctrl+C. Do you want to save your game before exiting? [Y/n] "
-    [[ ${REPLY} =~ ^[nN]$ ]] && exit 0
+    ask_question "You've pressed Ctrl+C. Do you want to save your game before exiting? [Y/n]" ^[nN]$ && exit 0
     if ! save_game; then
-        read -r -p "Save was not successful (error code $?). Do you want to quit? [y/N]"
-        [[ ${REPLY} =~ ^[yY]$ ]] && exit 1
+        echo "Save was not successful (error code $?). The game will be lost, muahahahahaha"
+        exit 1
     fi
     exit 0
 }
@@ -56,7 +67,7 @@ function try_loading_game()
     i=0
 
     for file in "${filelist[@]}"; do
-        echo "$i : ${file#$savename_start}"
+        echo "$i : ${file#"$savename_start"}"
         i=$((i+1))
     done
     while true; do
@@ -66,7 +77,12 @@ function try_loading_game()
                 echo "Invalid index: ${REPLY}"
                 continue
             else
-                read -r -a board <<< "$(cat "${filelist[$REPLY]}")"
+                current_player=$(cut -f2 -d'|' -s "${filelist[$REPLY]}")
+                has_computer_save=$(cut -f3 -d'|' -s "${filelist[$REPLY]}")
+                if [ -n "${has_computer_save}" ]; then
+                    computer_player="${has_computer_save}"
+                fi
+                read -r -a board <<< "$(cut -f1 -d'|' -s "${filelist[$REPLY]}")"
                 rm "${filelist[$REPLY]}"
             fi
         fi
@@ -129,25 +145,39 @@ function get_player_move()
         if [ "${board[${position}]}" != "${EMPTY}" ]; then
             echo "Position ${REPLY} already filled, try again"
         else
-            if [ "${1}" -eq 1 ]; then
-                board[${position}]="${player1}"
-            elif [ "${1}" -eq 2 ]; then
-                board[${position}]="${player2}"
-            else
-                echo "[!!!] Invalid player passed to get_player_move: ${1}"
-                exit
-            fi
+            board[${position}]="${1}"
             break;
+        fi
+    done
+}
+
+# The specification did not specify the algorithm for choosing moves by computer
+# and since I frankly speaking didn't have time to implement min-max algorithm
+# for now I'm going to choose a field at random
+function get_random_move()
+{
+    while true; do
+        echo "Computer moves now: "
+        field=$((RANDOM % 9))
+        if [ "${board[${field}]}" = $EMPTY ]; then
+            board[${field}]=$computer_player
+            break
         fi
     done
 }
 
 function play()
 {
-    current_player=1
+    if [ -z "${current_player}" ]; then
+        current_player=${player1}
+    fi
     while true; do
         print_board "${board[@]}"
-        get_player_move ${current_player}
+        if [ ${current_player} = "${computer_player}" ]; then
+            get_random_move
+        else
+            get_player_move ${current_player}
+        fi
 
         if check_lines; then
             break
@@ -158,12 +188,25 @@ function play()
             break
         fi
 
-        if [ ${current_player} -eq 1 ]; then
-            current_player=2
+        if [ ${current_player} = ${player1} ]; then
+            current_player=${player2}
         else
-            current_player=1
+            current_player=${player1}
         fi
     done
+}
+
+function ask_computer_player()
+{
+    echo "### computer_player '${computer_player}'"
+    if [ -z "${computer_player}" ]; then
+        ask_question "Do you want to play with a computer [c] or with a second player [any other key]?" ^[cC]$ || return 0
+        if [ $((RANDOM % 2)) -eq 0 ]; then
+            computer_player=${player1}
+        else
+            computer_player=${player2}
+        fi
+    fi
 }
 
 function main()
@@ -172,6 +215,9 @@ function main()
     while true; do
         try_loading_game
         trap 'save_game_prompt' INT
+        if [ -z "${current_player}" ]; then
+            ask_computer_player
+        fi
         play
         read -r -p "Do you want to play again? [Y/n]"
         [[ ${REPLY} =~ ^[nN]$ ]] && break
